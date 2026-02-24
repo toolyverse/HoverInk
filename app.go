@@ -44,7 +44,7 @@ func (a *App) getWindowHandle() uintptr {
 		return a.hwnd
 	}
 
-	titlePtr, err := syscall.UTF16PtrFromString("EpicPenGo")
+	titlePtr, err := syscall.UTF16PtrFromString("HoverInk")
 	if err != nil {
 		return 0
 	}
