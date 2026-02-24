@@ -1,5 +1,9 @@
 # HoverInk
 
+<p align="center">
+  <img src="logo.png" alt="HoverInk Logo" width="200"/>
+</p>
+
 A lightweight, transparent screen drawing tool built with Go (Wails), React, and TypeScript. HoverInk lets you draw directly on your screen and seamlessly toggle between drawing and interacting with the applications behind it.
 
 ## Features
