@@ -3,7 +3,7 @@ import { EventsOn, Quit } from '../wailsjs/runtime/runtime';
 import './App.css';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Tool = 'pen' | 'eraser' | 'rectangle' | 'circle' | 'arrow' | 'line';
+type Tool = 'pen' | 'highlighter' | 'eraser' | 'rectangle' | 'circle' | 'arrow' | 'line';
 type Orientation = 'horizontal' | 'vertical';
 interface Snapshot { data: ImageData; }
 
@@ -17,6 +17,7 @@ const BRUSH_SIZES = [2, 4, 8, 14, 22];
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const Icons: Record<string, JSX.Element> = {
   pen:        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>,
+  highlighter:<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="14" width="18" height="4" rx="1" fill="currentColor" fillOpacity="0.3"/><path d="M9 11l-6 7"/><path d="M17 3l4 4-10 7-4-4 10-7z"/><line x1="4" y1="20" x2="20" y2="20" strokeWidth="1.5" strokeOpacity="0.4"/></svg>,
   eraser:     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 20H7L3 16l10-10 7 7-2.5 2.5"/><path d="M6 11l7 7"/></svg>,
   rectangle:  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>,
   circle:     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/></svg>,
@@ -163,10 +164,20 @@ export default function App() {
   // ── Canvas helpers ────────────────────────────────────────────────────────
   const applyCtx = (ctx: CanvasRenderingContext2D) => {
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.lineWidth = tool === 'eraser' ? size * 4 : size;
+    ctx.lineWidth = tool === 'eraser' ? size * 4 : tool === 'highlighter' ? size * 8 : size;
     if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
+    } else if (tool === 'highlighter') {
+      ctx.globalCompositeOperation = 'source-over';
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      const rgba = `rgba(${r},${g},${b},0.25)`;
+      ctx.strokeStyle = rgba;
+      ctx.fillStyle = rgba;
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = color; ctx.fillStyle = color;
@@ -200,17 +211,39 @@ export default function App() {
   const onMouseDown = (e: React.MouseEvent) => {
     if (isClickThrough) return;
     const ctx = getCtx(); const cv = canvasRef.current; if (!ctx || !cv) return;
-    pushUndo(); applyCtx(ctx);
+    pushUndo();
     startPos.current = { x: e.clientX, y: e.clientY };
     isDrawingRef.current = true;
-    if (tool === 'pen' || tool === 'eraser') { ctx.beginPath(); ctx.moveTo(e.clientX, e.clientY); }
-    else snapRef.current = ctx.getImageData(0, 0, cv.width, cv.height);
+
+    if (tool === 'highlighter') {
+      // nothing yet — wait for drag to know width
+    } else if (tool === 'pen' || tool === 'eraser') {
+      applyCtx(ctx);
+      ctx.beginPath();
+      ctx.moveTo(e.clientX, e.clientY);
+    } else {
+      snapRef.current = ctx.getImageData(0, 0, cv.width, cv.height);
+    }
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
     if (!isDrawingRef.current || isClickThrough) return;
     const { x: x1, y: y1 } = startPos.current;
-    if (tool === 'pen' || tool === 'eraser') {
+
+    if (tool === 'highlighter') {
+      // Preview: flat horizontal rect on overlay, Y locked to mouseDown Y
+      const ov = overlayRef.current; const ovCtx = getOvCtx(); if (!ov || !ovCtx) return;
+      const hlH = size * 8; // height of highlight band
+      ovCtx.clearRect(0, 0, ov.width, ov.height);
+      applyCtx(ovCtx);
+      const x2 = e.clientX;
+      ovCtx.fillRect(
+        Math.min(x1, x2),
+        y1 - hlH / 2,
+        Math.abs(x2 - x1),
+        hlH
+      );
+    } else if (tool === 'pen' || tool === 'eraser') {
       const ctx = getCtx(); if (!ctx) return;
       applyCtx(ctx); ctx.lineTo(e.clientX, e.clientY); ctx.stroke();
     } else {
@@ -223,12 +256,31 @@ export default function App() {
   const onMouseUp = (e: React.MouseEvent) => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
-    const ctx = getCtx(); const ov = overlayRef.current; const ovCtx = getOvCtx();
-    if (ctx && tool !== 'pen' && tool !== 'eraser') {
-      if (snapRef.current) ctx.putImageData(snapRef.current, 0, 0);
-      applyCtx(ctx); drawShape(ctx, startPos.current.x, startPos.current.y, e.clientX, e.clientY);
-    } else ctx?.closePath();
-    if (ovCtx && ov) ovCtx.clearRect(0, 0, ov.width, ov.height);
+    const ctx = getCtx(); const cv = canvasRef.current;
+    const ov = overlayRef.current; const ovCtx = getOvCtx();
+
+    if (tool === 'highlighter') {
+      // Commit flat rect to main canvas
+      const { x: x1, y: y1 } = startPos.current;
+      const x2 = e.clientX;
+      const hlH = size * 8;
+      if (ctx) {
+        applyCtx(ctx);
+        ctx.fillRect(
+          Math.min(x1, x2),
+          y1 - hlH / 2,
+          Math.abs(x2 - x1),
+          hlH
+        );
+      }
+      if (ovCtx && ov) ovCtx.clearRect(0, 0, ov.width, ov.height);
+    } else if (tool !== 'pen' && tool !== 'eraser') {
+      if (ctx && snapRef.current) ctx.putImageData(snapRef.current, 0, 0);
+      if (ctx) { applyCtx(ctx); drawShape(ctx, startPos.current.x, startPos.current.y, e.clientX, e.clientY); }
+      if (ovCtx && ov) ovCtx.clearRect(0, 0, ov.width, ov.height);
+    } else {
+      ctx?.closePath();
+    }
   };
 
   // ── Drag handle ───────────────────────────────────────────────────────────
@@ -266,7 +318,7 @@ export default function App() {
         onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
         style={{
           position: 'absolute', inset: 0, display: 'block', background: 'transparent',
-          cursor: isClickThrough ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair',
+          cursor: isClickThrough ? 'default' : tool === 'eraser' ? 'cell' : tool === 'highlighter' ? 'text' : 'crosshair',
           pointerEvents: isClickThrough ? 'none' : 'auto',
         }}
       />
@@ -314,9 +366,9 @@ export default function App() {
         <Divider isV={isV} />
 
         {/* Drawing tools */}
-        {(['pen', 'eraser', 'line', 'arrow', 'rectangle', 'circle'] as Tool[]).map(t => (
+        {(['pen', 'highlighter', 'eraser', 'line', 'arrow', 'rectangle', 'circle'] as Tool[]).map(t => (
           <ToolBtn key={t} active={tool === t} onClick={() => setTool(t)}
-            title={{ pen: 'Pen', eraser: 'Eraser', rectangle: 'Rectangle', circle: 'Circle', arrow: 'Arrow', line: 'Line' }[t]}>
+            title={{ pen: 'Pen', highlighter: 'Highlighter', eraser: 'Eraser', rectangle: 'Rectangle', circle: 'Circle', arrow: 'Arrow', line: 'Line' }[t]}>
             {Icons[t]}
           </ToolBtn>
         ))}
