@@ -28,19 +28,20 @@ const Icons: Record<string, JSX.Element> = {
   horizontal: <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="2" y="9" width="20" height="6" rx="2"/></svg>,
   vertical:   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="2" width="6" height="20" rx="2"/></svg>,
   close:      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-  drag:       <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor"><circle cx="7" cy="4"  r="1.4"/><circle cx="13" cy="4"  r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="16" r="1.4"/><circle cx="13" cy="16" r="1.4"/></svg>,
+  drag:       <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor"><circle cx="7" cy="4" r="1.4"/><circle cx="13" cy="4" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="16" r="1.4"/><circle cx="13" cy="16" r="1.4"/></svg>,
 };
 
 // ── ToolBtn ───────────────────────────────────────────────────────────────────
-function ToolBtn({ active, onClick, title, dim = 34, children }: {
-  active?: boolean; onClick: () => void; title: string; dim?: number; children: React.ReactNode;
+function ToolBtn({ active, onClick, title, children }: {
+  active?: boolean; onClick: () => void; title: string; children: React.ReactNode;
 }) {
   const [hov, setHov] = useState(false);
   return (
     <button onClick={onClick} title={title}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
-        width: dim, height: dim, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 34, height: 34,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: active ? 'rgba(255,255,255,0.17)' : hov ? 'rgba(255,255,255,0.08)' : 'transparent',
         border: `1.5px solid ${active ? 'rgba(255,255,255,0.42)' : 'transparent'}`,
         borderRadius: 8, color: active ? '#fff' : 'rgba(255,255,255,0.62)',
@@ -67,16 +68,16 @@ export default function App() {
   const startPos     = useRef({ x: 0, y: 0 });
   const snapRef      = useRef<ImageData | null>(null);
 
-  // Toolbar drag state
-  const [tbPos, setTbPos] = useState<{ x: number; y: number } | null>(null);
-  const draggingTb = useRef(false);
+  // Draggable toolbar: null = use CSS centering, non-null = user dragged position
+  const [dragPos, setDragPos]     = useState<{ x: number; y: number } | null>(null);
+  const draggingTb  = useRef(false);
   const dragOffset  = useRef({ x: 0, y: 0 });
 
   const [isClickThrough, setIsClickThrough] = useState(false);
-  const [tool,  setTool]        = useState<Tool>('pen');
-  const [color, setColor]       = useState('#FF4444');
-  const [size,  setSize]        = useState(4);
-  const [fill,  setFill]        = useState(false);
+  const [tool,        setTool]        = useState<Tool>('pen');
+  const [color,       setColor]       = useState('#FF4444');
+  const [size,        setSize]        = useState(4);
+  const [fill,        setFill]        = useState(false);
   const [orientation, setOrientation] = useState<Orientation>('horizontal');
 
   const undoStack = useRef<Snapshot[]>([]);
@@ -122,9 +123,6 @@ export default function App() {
     cv.width = ov.width = window.innerWidth;
     cv.height = ov.height = window.innerHeight;
 
-    // Default toolbar position
-    setTbPos({ x: window.innerWidth / 2 - 300, y: window.innerHeight - 72 });
-
     const onResize = () => {
       const ctx = getCtx(); if (!ctx || !cv || !ov) return;
       const img = ctx.getImageData(0, 0, cv.width, cv.height);
@@ -138,7 +136,7 @@ export default function App() {
     };
     const onMouseMove = (e: MouseEvent) => {
       if (!draggingTb.current) return;
-      setTbPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+      setDragPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
     };
     const onMouseUp = () => { draggingTb.current = false; };
 
@@ -156,14 +154,11 @@ export default function App() {
     };
   }, [undo, redo]);
 
-  // Reset toolbar position when orientation changes
-  useEffect(() => {
-    if (orientation === 'vertical') {
-      setTbPos({ x: window.innerWidth - 68, y: window.innerHeight / 2 - 220 });
-    } else {
-      setTbPos({ x: window.innerWidth / 2 - 300, y: window.innerHeight - 72 });
-    }
-  }, [orientation]);
+  // When orientation changes, reset drag so CSS centering takes over again
+  const handleOrientationToggle = () => {
+    setDragPos(null);
+    setOrientation(o => o === 'horizontal' ? 'vertical' : 'horizontal');
+  };
 
   // ── Canvas helpers ────────────────────────────────────────────────────────
   const applyCtx = (ctx: CanvasRenderingContext2D) => {
@@ -236,13 +231,30 @@ export default function App() {
     if (ovCtx && ov) ovCtx.clearRect(0, 0, ov.width, ov.height);
   };
 
+  // ── Drag handle ───────────────────────────────────────────────────────────
   const handleDragStart = (e: React.MouseEvent) => {
-    draggingTb.current = true;
-    dragOffset.current = { x: e.clientX - (tbPos?.x ?? 0), y: e.clientY - (tbPos?.y ?? 0) };
     e.preventDefault();
+    // Get current rendered position of toolbar to use as drag origin
+    const tb = e.currentTarget.closest<HTMLElement>('[data-toolbar]');
+    if (!tb) return;
+    const rect = tb.getBoundingClientRect();
+    draggingTb.current = true;
+    dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    setDragPos({ x: rect.left, y: rect.top }); // lock in current position before dragging
   };
 
   const isV = orientation === 'vertical';
+
+  // ── Toolbar position style ────────────────────────────────────────────────
+  // When dragPos is null: use CSS to perfectly center without knowing pixel size
+  //   horizontal → bottom center
+  //   vertical   → right center
+  // When dragPos is set (user dragged): use absolute pixel coords
+  const toolbarPositionStyle: React.CSSProperties = dragPos
+    ? { left: dragPos.x, top: dragPos.y, transform: 'none' }
+    : isV
+      ? { right: 24, top: '50%', transform: 'translateY(-50%)' }
+      : { bottom: 24, left: '50%', transform: 'translateX(-50%)' };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -259,12 +271,12 @@ export default function App() {
         }}
       />
 
-      {/* ── Floating Toolbar ───────────────────────────────────────────────── */}
-      {tbPos && (
-        <div style={{
+      {/* ── Floating Toolbar ── */}
+      <div
+        data-toolbar=""
+        style={{
           position: 'absolute',
-          left: tbPos.x,
-          top: tbPos.y,
+          ...toolbarPositionStyle,
           zIndex: 9999,
           display: 'flex',
           flexDirection: isV ? 'column' : 'row',
@@ -281,157 +293,155 @@ export default function App() {
           transition: 'opacity 0.3s',
           pointerEvents: isClickThrough ? 'none' : 'auto',
           userSelect: 'none',
-        }}>
-
-          {/* Drag handle */}
-          <div
-            onMouseDown={handleDragStart}
-            title="Drag to move toolbar"
-            style={{
-              cursor: 'grab', color: 'rgba(255,255,255,0.28)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 28, height: 22, borderRadius: 5,
-              transition: 'color 0.15s, background 0.15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.28)'; e.currentTarget.style.background = 'transparent'; }}
-          >
-            {Icons.drag}
-          </div>
-
-          <Divider isV={isV} />
-
-          {/* Drawing tools */}
-          {(['pen', 'eraser', 'line', 'arrow', 'rectangle', 'circle'] as Tool[]).map(t => (
-            <ToolBtn key={t} active={tool === t} onClick={() => setTool(t)}
-              title={{ pen: 'Pen', eraser: 'Eraser', rectangle: 'Rectangle', circle: 'Circle', arrow: 'Arrow', line: 'Line' }[t]}>
-              {Icons[t]}
-            </ToolBtn>
-          ))}
-
-          <Divider isV={isV} />
-
-          {/* Fill */}
-          <ToolBtn active={fill} onClick={() => setFill(f => !f)} title={fill ? 'Fill: On' : 'Fill: Off'}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="3"/>
-            </svg>
-          </ToolBtn>
-
-          <Divider isV={isV} />
-
-          {/* Brush sizes */}
-          {BRUSH_SIZES.map(s => (
-            <button key={s} onClick={() => setSize(s)} title={`${s}px`} style={{
-              width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: size === s ? 'rgba(255,255,255,0.13)' : 'transparent',
-              border: `1.5px solid ${size === s ? 'rgba(255,255,255,0.36)' : 'transparent'}`,
-              borderRadius: 7, cursor: 'pointer', outline: 'none', flexShrink: 0, transition: 'all 0.12s',
-            }}>
-              <div style={{
-                width: Math.min(s + 3, 20), height: Math.min(s + 3, 20),
-                borderRadius: '50%', background: color,
-                opacity: size === s ? 1 : 0.38, transition: 'all 0.12s',
-              }} />
-            </button>
-          ))}
-
-          <Divider isV={isV} />
-
-          {/* Colors — wrap in 2 columns when vertical */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: isV ? 'repeat(2, 1fr)' : 'repeat(12, 1fr)',
-            gap: 4,
-          }}>
-            {COLORS.map(c => (
-              <button key={c} onClick={() => setColor(c)} title={c} style={{
-                width: 16, height: 16, borderRadius: '50%', background: c, padding: 0,
-                border: color === c ? '2.5px solid #fff' : '2px solid rgba(255,255,255,0.1)',
-                outline: 'none', cursor: 'pointer',
-                boxShadow: color === c ? `0 0 0 2px ${c}55` : '0 1px 3px rgba(0,0,0,0.4)',
-                transition: 'transform 0.1s',
-              }}
-                onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.3)')}
-                onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-              />
-            ))}
-          </div>
-
-          {/* Custom color */}
-          <label title="Custom color" style={{ position: 'relative', width: 22, height: 22, cursor: 'pointer', flexShrink: 0 }}>
-            <div style={{
-              width: 22, height: 22, borderRadius: 6, boxSizing: 'border-box',
-              background: 'conic-gradient(red,yellow,lime,aqua,blue,magenta,red)',
-              border: '1.5px solid rgba(255,255,255,0.2)',
-            }} />
-            <input type="color" value={color} onChange={e => setColor(e.target.value)}
-              style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
-          </label>
-
-          <Divider isV={isV} />
-
-          {/* Undo / Redo / Clear */}
-          <ToolBtn active={false} onClick={undo} title="Undo (Ctrl+Z)">
-            <span style={{ opacity: canUndo ? 1 : 0.22, display: 'flex', transition: 'opacity 0.15s' }}>{Icons.undo}</span>
-          </ToolBtn>
-          <ToolBtn active={false} onClick={redo} title="Redo (Ctrl+Y)">
-            <span style={{ opacity: canRedo ? 1 : 0.22, display: 'flex', transition: 'opacity 0.15s' }}>{Icons.redo}</span>
-          </ToolBtn>
-          <ToolBtn active={false} onClick={clearAll} title="Clear all">
-            {Icons.trash}
-          </ToolBtn>
-
-          <Divider isV={isV} />
-
-          {/* Orientation toggle */}
-          <ToolBtn active={false}
-            onClick={() => setOrientation(o => o === 'horizontal' ? 'vertical' : 'horizontal')}
-            title={isV ? 'Switch to horizontal' : 'Switch to vertical'}>
-            {isV ? Icons.horizontal : Icons.vertical}
-          </ToolBtn>
-
-          {/* ESC mode badge */}
-          <div style={{
-            fontSize: 10, color: isClickThrough ? '#666' : 'rgba(255,255,255,0.55)',
-            fontFamily: 'system-ui, sans-serif', whiteSpace: 'nowrap', textAlign: 'center',
-            padding: isV ? '0' : '0 1px',
-          }}>
-            {isClickThrough ? '🖱️' : '✏️'}
-            <kbd style={{
-              marginLeft: 3, padding: '1px 3px',
-              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.11)',
-              borderRadius: 3, fontSize: 8.5, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)',
-            }}>ESC</kbd>
-          </div>
-
-          <Divider isV={isV} />
-
-          {/* Close */}
-          <button
-            onClick={() => { try { Quit(); } catch { window.close(); } }}
-            title="Close application"
-            style={{
-              width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'transparent', border: '1.5px solid transparent', borderRadius: 8,
-              color: 'rgba(255,80,80,0.65)', cursor: 'pointer', outline: 'none', flexShrink: 0,
-              transition: 'all 0.15s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = 'rgba(255,50,50,0.16)';
-              e.currentTarget.style.borderColor = 'rgba(255,80,80,0.38)';
-              e.currentTarget.style.color = '#ff5555';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.borderColor = 'transparent';
-              e.currentTarget.style.color = 'rgba(255,80,80,0.65)';
-            }}
-          >
-            {Icons.close}
-          </button>
+        }}
+      >
+        {/* Drag handle */}
+        <div
+          onMouseDown={handleDragStart}
+          title="Drag to move toolbar"
+          style={{
+            cursor: 'grab', color: 'rgba(255,255,255,0.28)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 28, height: 22, borderRadius: 5,
+            transition: 'color 0.15s, background 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.28)'; e.currentTarget.style.background = 'transparent'; }}
+        >
+          {Icons.drag}
         </div>
-      )}
+
+        <Divider isV={isV} />
+
+        {/* Drawing tools */}
+        {(['pen', 'eraser', 'line', 'arrow', 'rectangle', 'circle'] as Tool[]).map(t => (
+          <ToolBtn key={t} active={tool === t} onClick={() => setTool(t)}
+            title={{ pen: 'Pen', eraser: 'Eraser', rectangle: 'Rectangle', circle: 'Circle', arrow: 'Arrow', line: 'Line' }[t]}>
+            {Icons[t]}
+          </ToolBtn>
+        ))}
+
+        <Divider isV={isV} />
+
+        {/* Fill toggle */}
+        <ToolBtn active={fill} onClick={() => setFill(f => !f)} title={fill ? 'Fill: On' : 'Fill: Off'}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+          </svg>
+        </ToolBtn>
+
+        <Divider isV={isV} />
+
+        {/* Brush sizes */}
+        {BRUSH_SIZES.map(s => (
+          <button key={s} onClick={() => setSize(s)} title={`${s}px`} style={{
+            width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: size === s ? 'rgba(255,255,255,0.13)' : 'transparent',
+            border: `1.5px solid ${size === s ? 'rgba(255,255,255,0.36)' : 'transparent'}`,
+            borderRadius: 7, cursor: 'pointer', outline: 'none', flexShrink: 0, transition: 'all 0.12s',
+          }}>
+            <div style={{
+              width: Math.min(s + 3, 20), height: Math.min(s + 3, 20),
+              borderRadius: '50%', background: color,
+              opacity: size === s ? 1 : 0.38, transition: 'all 0.12s',
+            }} />
+          </button>
+        ))}
+
+        <Divider isV={isV} />
+
+        {/* Color palette — 2 columns in vertical mode */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isV ? 'repeat(2, 1fr)' : 'repeat(12, 1fr)',
+          gap: 4,
+        }}>
+          {COLORS.map(c => (
+            <button key={c} onClick={() => setColor(c)} title={c} style={{
+              width: 16, height: 16, borderRadius: '50%', background: c, padding: 0,
+              border: color === c ? '2.5px solid #fff' : '2px solid rgba(255,255,255,0.1)',
+              outline: 'none', cursor: 'pointer',
+              boxShadow: color === c ? `0 0 0 2px ${c}55` : '0 1px 3px rgba(0,0,0,0.4)',
+              transition: 'transform 0.1s',
+            }}
+              onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.3)')}
+              onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+            />
+          ))}
+        </div>
+
+        {/* Custom color picker */}
+        <label title="Custom color" style={{ position: 'relative', width: 22, height: 22, cursor: 'pointer', flexShrink: 0 }}>
+          <div style={{
+            width: 22, height: 22, borderRadius: 6, boxSizing: 'border-box',
+            background: 'conic-gradient(red,yellow,lime,aqua,blue,magenta,red)',
+            border: '1.5px solid rgba(255,255,255,0.2)',
+          }} />
+          <input type="color" value={color} onChange={e => setColor(e.target.value)}
+            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
+        </label>
+
+        <Divider isV={isV} />
+
+        {/* Undo / Redo / Clear */}
+        <ToolBtn active={false} onClick={undo} title="Undo (Ctrl+Z)">
+          <span style={{ opacity: canUndo ? 1 : 0.22, display: 'flex', transition: 'opacity 0.15s' }}>{Icons.undo}</span>
+        </ToolBtn>
+        <ToolBtn active={false} onClick={redo} title="Redo (Ctrl+Y)">
+          <span style={{ opacity: canRedo ? 1 : 0.22, display: 'flex', transition: 'opacity 0.15s' }}>{Icons.redo}</span>
+        </ToolBtn>
+        <ToolBtn active={false} onClick={clearAll} title="Clear all">
+          {Icons.trash}
+        </ToolBtn>
+
+        <Divider isV={isV} />
+
+        {/* Orientation toggle */}
+        <ToolBtn active={false} onClick={handleOrientationToggle}
+          title={isV ? 'Switch to horizontal' : 'Switch to vertical'}>
+          {isV ? Icons.horizontal : Icons.vertical}
+        </ToolBtn>
+
+        {/* ESC mode badge */}
+        <div style={{
+          fontSize: 10, color: isClickThrough ? '#666' : 'rgba(255,255,255,0.55)',
+          fontFamily: 'system-ui, sans-serif', whiteSpace: 'nowrap', textAlign: 'center',
+          padding: isV ? '0' : '0 1px',
+        }}>
+          {isClickThrough ? '🖱️' : '✏️'}
+          <kbd style={{
+            marginLeft: 3, padding: '1px 3px',
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.11)',
+            borderRadius: 3, fontSize: 8.5, fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)',
+          }}>ESC</kbd>
+        </div>
+
+        <Divider isV={isV} />
+
+        {/* Close */}
+        <button
+          onClick={() => { try { Quit(); } catch { window.close(); } }}
+          title="Close application"
+          style={{
+            width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: '1.5px solid transparent', borderRadius: 8,
+            color: 'rgba(255,80,80,0.65)', cursor: 'pointer', outline: 'none', flexShrink: 0,
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'rgba(255,50,50,0.16)';
+            e.currentTarget.style.borderColor = 'rgba(255,80,80,0.38)';
+            e.currentTarget.style.color = '#ff5555';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.borderColor = 'transparent';
+            e.currentTarget.style.color = 'rgba(255,80,80,0.65)';
+          }}
+        >
+          {Icons.close}
+        </button>
+      </div>
     </div>
   );
 }
