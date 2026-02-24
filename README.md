@@ -13,12 +13,12 @@ A lightweight, transparent screen drawing tool built with Go (Wails), React, and
 
 ## Screenshots
 
-![HoverInk in Action](image.png)
+![HoverInk in Action](assets/image.png)
 
 **Toolbox States:**
-* Active Toolbar: ![Active Toolbox](image-2.png)
-* Deactivated (Click-Through) Toolbar: ![Deactive Toolbox](image-1.png)
-* Vertical Mode: ![Vertical Mode](image-3.png)
+* Active Toolbar: ![Active Toolbox](assets/image-2.png)
+* Deactivated (Click-Through) Toolbar: ![Deactive Toolbox](assets/image-1.png)
+* Vertical Mode: ![Vertical Mode](assets/image-3.png)
 
 ## Development
 
