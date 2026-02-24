@@ -16,8 +16,7 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:            "HoverInk",
-		Width:            1920,
-		Height:           1080,
+		WindowStartState: options.Fullscreen,
 		Frameless:        true,
 		AlwaysOnTop:      true,
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
