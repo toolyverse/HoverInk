@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -18,7 +20,7 @@ var (
 )
 
 const (
-	GWL_EXSTYLE       = ^uintptr(19) // -20 as uintptr (two's complement)
+	GWL_EXSTYLE       = ^uintptr(19)
 	WS_EX_TRANSPARENT = uintptr(0x00000020)
 	WS_EX_LAYERED     = uintptr(0x00080000)
 	VK_ESCAPE         = uintptr(0x1B)
@@ -43,16 +45,11 @@ func (a *App) getWindowHandle() uintptr {
 	if a.hwnd != 0 {
 		return a.hwnd
 	}
-
 	titlePtr, err := syscall.UTF16PtrFromString("HoverInk")
 	if err != nil {
 		return 0
 	}
-
-	ret, _, _ := procFindWindowW.Call(
-		0,
-		uintptr(unsafe.Pointer(titlePtr)),
-	)
+	ret, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
 	a.hwnd = ret
 	return a.hwnd
 }
@@ -62,20 +59,15 @@ func (a *App) toggleClickThrough() {
 	if hwnd == 0 {
 		return
 	}
-
 	style, _, _ := procGetWindowLongPtrW.Call(hwnd, GWL_EXSTYLE)
-
 	a.clickThrough = !a.clickThrough
-
 	if a.clickThrough {
 		style |= WS_EX_LAYERED | WS_EX_TRANSPARENT
 	} else {
 		style &^= WS_EX_TRANSPARENT
 		style |= WS_EX_LAYERED
 	}
-
 	procSetWindowLongPtrW.Call(hwnd, GWL_EXSTYLE, style)
-
 	runtime.EventsEmit(a.ctx, "modeChanged", a.clickThrough)
 }
 
